@@ -69,11 +69,11 @@ from email.utils import make_msgid
 
 from smtpd import PureProxy
 import asyncore
-from daemon import Daemon
 
 import re
 from urlparse import urlparse
 
+from daemon import Daemon
 # Insert modification in email header
 X_HEADER = True
 
@@ -101,8 +101,8 @@ class HyperTextFormatter(object):
     '''Parse plain text and generate hypertext'''
 
     HTML_HEADER = \
-u'''<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
-       "http://www.w3.org/TR/html4/loose.dtd">
+        u'''<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+    "http://www.w3.org/TR/html4/loose.dtd">
 <head>
 <meta http-equiv="content-type" content="text/html; charset=UTF-8">
 <style type="text/css">
@@ -115,7 +115,8 @@ u'''<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
 </head>
 <body>
 '''
-    HTML_FOOTER = u'</body>\n</html>'
+    HTML_FOOTER = \
+        u'''</body>\n</html>'''
     # Regex for referal of image attachements
     RXP_IMG_TAG = re.compile(ur'(<img\s[^>]*src=")([^"]+)("[^>]*>)',
                              re.UNICODE)
@@ -131,21 +132,17 @@ u'''<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
         self.attachments = []
         self.parts = 1
 
-
     def add_txt(self, txt=u''):
         """add plain text and wrap it to html"""
         self.txt += txt2html(txt)
-
 
     def add_html(self, html=u''):
         """add html text without modification"""
         self.txt += html
 
-
     def add_footer(self):
         """extends the current html text with the default footer"""
         self.txt += self.HTML_FOOTER
-
 
     def create_mime_attachments(self):
         """scans current html text, creates a MIME object for every
@@ -153,7 +150,6 @@ u'''<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
            reference to the generated MIME objects.
            Returns the list of generated MIME objects.
         """
-
 
         def replacer(match):
             """callback function for re.sub"""
@@ -166,7 +162,7 @@ u'''<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
             img.add_header('Content-ID', img_id)
             img.add_header('Content-Disposition',
                            'attachment',
-                           filename = path)
+                           filename=path)
             self.attachments.append(img)
             self.parts += 1
             return "%scid:%s%s" % (match.group(1),
@@ -176,12 +172,11 @@ u'''<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
         self.txt = self.RXP_IMG_TAG.sub(replacer, self.txt)
         return self.attachments
 
-
     def get(self, add_footer=True):
+        """returns htmlized email message"""
         if add_footer:
             self.add_footer()
         return self.txt
-
 
     def has_attachments(self):
         """returns True if img tags with file: or no protocol extension
@@ -190,70 +185,64 @@ u'''<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
         match = self.RXP_IMG_TAG.search(self.txt)
         if match:
             scheme, path = urlparse(match.group(2))[0, 3, 2]
-            if (path and (not scheme or scheme == "file")):
+            if path and (not scheme or scheme == "file"):
                 return True
-
         return False
 
 
+def copy_mime_root(msg, strip_content=True):
+    """Make a copy of the non_payload root mime part of msg and change
+    content type to multipart/alternativ. By default drop old Content- headers.
+    """
+
+    msg_new = MIMEMultipart()
+    # drop default keys
+    for k in msg_new.keys():
+        del msg_new[k]
+
+    # make copy of old header
+    for k, v in msg.items():
+        if strip_content and k.startswith('Content-'):
+            continue
+        msg_new[k] = v
+
+    if msg.get_unixfrom():
+        msg_new.set_unixfrom(msg.get_unixfrom())
+    if msg.preamble:
+        msg_new.preamble = msg.preamble
+    else:
+        msg_new.preamble = "This is a multi-part message in MIME format...\n"
+    if msg.epilogue:
+        msg_new.epilogue = msg.epilogue
+
+    # set msg_new type
+    msg_new.set_type('multipart/alternative')
+    return msg_new
+
+
+def first_text(msg):
+    """returns first text/plain part of a message as unicode string"""
+    if not msg.is_multipart():
+        if msg.get_content_type() != 'text/plain':
+            return u''
+        else:
+            return payload2unicode(msg)
+    else:
+        for match in msg.get_payload():
+            if match.get_content_type() == 'text/plain':
+                return payload2unicode(match)
+    return u''
+
+
 class MIMEChanger(object):
+    """
+    This class actually changes email's mime structure
+    """
 
     # Regex to split message from signature
     RXP_SIGNATURE = re.compile(r'(.*)^--\s+(.*)',
                                re.MULTILINE | re.DOTALL | re.UNICODE)
     RXP_SIG_HTML = re.compile(ur'^<html>\n', re.MULTILINE | re.UNICODE)
-
-
-    def __init__(self):
-        pass
-
-
-    def _copy_mime_root(self,
-                       msg,
-                       strip_content = True):
-        """Make a copy of the non_payload root mime part of msg and change
-        content type to multipart/alternativ. By default drop old Content- headers.
-        """
-
-        msg_new = MIMEMultipart()
-        # drop default keys
-        for k in msg_new.keys():
-            del msg_new[k]
-
-        # make copy of old header
-        for k, v in msg.items():
-            if strip_content and k.startswith('Content-'):
-                continue
-            msg_new[k] = v
-
-        if msg.get_unixfrom():
-            msg_new.set_unixfrom(msg.get_unixfrom())
-        if msg.preamble:
-            msg_new.preamble = msg.preamble
-        else:
-            msg_new.preamble = "This is a multi-part message" \
-                               " in MIME format...\n"
-        if msg.epilogue:
-            msg_new.epilogue = msg.epilogue
-
-        # set msg_new type
-        msg_new.set_type('multipart/alternative')
-        return msg_new
-
-
-    def _first_text(self, msg):
-        """returns first text/plain part of a message as unicode string"""
-        if not msg.is_multipart():
-            if msg.get_content_type() != 'text/plain':
-                return u''
-            else:
-                return payload2unicode(msg)
-        else:
-            for match in msg.get_payload():
-                if match.get_content_type() == 'text/plain':
-                    return payload2unicode(match)
-        return u''
-
 
     def _process_multi(self, msg):
         """multipart messages can be changend in place"""
@@ -261,37 +250,34 @@ class MIMEChanger(object):
         i = 0
         pload = msg.get_payload()
         for msgpart in pload:
-            if msgpart.get_content_type() == 'text/plain': break
+            if msgpart.get_content_type() == 'text/plain':
+                break
             i += 1
 
         # change it to the new payload
         pload[i] = self.new_payload(pload[i])
         return msg
 
-
     def _process_plain(self, msg):
         """make container for plain messages"""
-        msg_new = self._copy_mime_root(msg)
+        msg_new = copy_mime_root(msg)
         new_pl = self.new_payload(msg)
         for msgpart in new_pl.get_payload():
             msg_new.attach(msgpart)
 
         return msg_new
 
-
-    def _split_content(self, txt = u''):
+    def _split_content(self, txt=u''):
         """Cuts content from signature of mail message"""
-        m = self.RXP_SIGNATURE.search(txt)
-        if m:
-            return m.groups()
+        match = self.RXP_SIGNATURE.search(txt)
+        if match:
+            return match.groups()
         else:
             return [txt, u'']
 
-
-    def _split_signature(self, txt = u''):
+    def _split_signature(self, txt=u''):
         """Cuts txt and html part of signature text"""
         return self.RXP_SIG_HTML.split(txt, 1)
-
 
     def alter_message(self, msg):
         """message modification function"""
@@ -304,29 +290,23 @@ class MIMEChanger(object):
 
         if X_HEADER:
             log.debug('add X-Modified-By header')
-            new_msg.add_header('X-Modified-By', 'Html Footer %s' % __version__ )
+            new_msg.add_header('X-Modified-By', 'Html Footer %s' % __version__)
         return new_msg
-
 
     def html_creator(self):
         """returns a HyperTextFormatter instance, can be overloaded
            in derived class for better layout creation"""
         return HyperTextFormatter()
 
-
     def msg_is_to_alter(self, msg):
         """check if message should be altered
         in this special case we look for a html/xml tag in the
         beginning of a line in the the first text/plain mail parts signature
         """
-        txt = self._first_text(msg)
+        txt = first_text(msg)
         sig = self._split_content(txt)[1]
 
-        if self.RXP_SIG_HTML.search(sig):
-            return True
-        else:
-            return False
-
+        return self.RXP_SIG_HTML.search(sig)
 
     def new_payload(self, mime_plain):
         """create a new mime structure from text/plain
@@ -399,13 +379,14 @@ class MIMEChanger(object):
 
 
 class SMTPHTMLFooterServer(PureProxy):
+    """Python's SMTP implementation"""
     def process_message(self, peer, mailfrom, rcpttos, data):
         # TODO return error status (as SMTP answer string)
         # if something goes wrong!
         try:
             data = modify_data(data)
             refused = self._deliver(mailfrom, rcpttos, data)
-        except Exception, err:
+        except Exception as err:
             log.exception('Error on delivery: %s', err)
             return '550 content rejected: %s' % err
         # TODO: what to do with refused addresses?
@@ -431,12 +412,12 @@ class Options:
     imagepath = '/var/lib/html_footer'
     logfile = ''
     txt2loglvl = {
-                  'critical' : logging.CRITICAL,
-                  'error': logging.ERROR,
-                  'warning': logging.WARNING,
-                  'info': logging.INFO,
-                  'debug': logging.DEBUG,
-                  }
+        'critical': logging.CRITICAL,
+        'error': logging.ERROR,
+        'warning': logging.WARNING,
+        'info': logging.INFO,
+        'debug': logging.DEBUG,
+    }
 
 
 def usage(code, msg=''):
@@ -445,6 +426,7 @@ def usage(code, msg=''):
         print >> sys.stderr, msg
     sys.exit(code)
 
+
 def parseargs():
     try:
         opts, args = getopt.getopt(
@@ -452,8 +434,8 @@ def parseargs():
             ['uid=', 'version', 'help', 'pipemode', 'debuglevel=',
              'listen=', 'remote=', 'imagepath=', 'logfile=',
              'kill', 'pidfile='])
-    except getopt.error, e:
-        usage(1, e)
+    except getopt.error as err:
+        usage(1, err)
 
     options = Options()
     for opt, arg in opts:
@@ -504,12 +486,12 @@ def parseargs():
 def modify_data(msg_in):
     msg = email.message_from_string(msg_in)
     if mymime.msg_is_to_alter(msg):
-        log.info('Msg(%s): altered' % msg.get('Message-ID',''))
+        log.info('Msg(%s): altered', msg.get('Message-ID', ''))
         msg = mymime.alter_message(msg)
-        log.debug('Msg out:\n%s' % msg.as_string(unixfrom=True))
+        log.debug('Msg out:\n%s', msg.as_string(unixfrom=True))
         return msg.as_string(unixfrom=True)
     else:
-        log.info('Msg(%s): nothing to alter' % msg.get('Message-ID',''))
+        log.info('Msg(%s): nothing to alter', msg.get('Message-ID', ''))
         return msg_in
 
 #
@@ -517,20 +499,19 @@ def modify_data(msg_in):
 #
 if __name__ == '__main__':
     options = parseargs()
-    logging.basicConfig(level = options.debuglevel,
-                        filename = options.logfile)
+    logging.basicConfig(level=options.debuglevel, filename=options.logfile)
     log = logging.getLogger('html_footer')
 
     # use as simple pipe filter
     if options.pipemode:
         msg_in = sys.stdin.read()
-        log.debug('Msg in:\n%s' % msg_in)
+        log.debug('Msg in:\n%s', msg_in)
         try:
             mymime = MIMEChanger()
             msg_out = modify_data(msg_in)
-            log.debug('Msg out:\n%s' % msg_out)
+            log.debug('Msg out:\n%s', msg_out)
             sys.stdout.write(msg_out)
-        except Exception, err:
+        except Exception as err:
             log.exception(err)
             sys.stdout.write(msg_in)
     # run as smtpd
@@ -553,10 +534,11 @@ try running as pipe filter (-p).''')
             runas = pwd.getpwnam(options.uid)[2]
             try:
                 os.setuid(runas)
-            except OSError, e:
-                if e.errno != errno.EPERM: raise
+            except OSError as err:
+                if err.errno != errno.EPERM:
+                    raise  # what else can happen?
                 log.exception('''Cannot setuid "%s";
-try running as pipe filer (-p).''' % options.uid)
+try running as pipe filer (-p).''', options.uid)
                 sys.exit(1)
         log.debug('Creating server instance')
         server = SMTPHTMLFooterServer(options.listen, options.remote)
